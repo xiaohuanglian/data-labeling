@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数据标注</title>
+  <link rel="stylesheet" href="/home-static/home.css" />
+</head>
+<body>
+  <header>
+    <p class="eyebrow">数据标注</p>
+    <h1>四个功能，各自独立</h1>
+    <p class="lead">点开要用的那一个。命名和标注不共用同一套文件名。</p>
+  </header>
+  <main>
+    <a class="card" href="/nq-name/">
+      <span>1</span>
+      <h2>非量化命名</h2>
+      <p>没有现场清单时，看一条，四个机位按同一序号改成 <code>P005_A01_L_E00_V01_C0</code>。对错写在文件名里。</p>
+    </a>
+    <a class="card" href="/nq-label/">
+      <span>2</span>
+      <h2>非量化标注</h2>
+      <p>片子已经按六段式命名之后，标每个 rep 的开始帧和结束帧。不抽帧，不改名。</p>
+    </a>
+    <a class="card" href="/q-name/">
+      <span>3</span>
+      <h2>量化命名</h2>
+      <p>看一条，四个机位一起写成 <code>sq_s004_t01_c0</code>。目标做法只进对照表，不进文件名。</p>
+    </a>
+    <a class="card" href="/q-label/">
+      <span>4</span>
+      <h2>量化标注</h2>
+      <p>按对照表切分。选一个机位来标，导出时四机同步切成 <code>sq_s004_r001_c0</code>，并写 labels.csv。</p>
+    </a>
+  </main>
+</body>
+</html>

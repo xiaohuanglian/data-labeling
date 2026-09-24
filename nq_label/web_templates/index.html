@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <base href="/nq-label/" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rep 起止帧标注</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="static/style.css?v=16" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">SEQ</div>
+      <div>
+        <h1>非量化标注</h1>
+        <p>每个 rep 的开始帧和结束帧 · 不抽中间帧 · 输出 CSV</p>
+      </div>
+    </div>
+    <a class="btn ghost" href="/">返回首页</a>
+    <div class="progress-chip" id="progressChip">等待选择视频文件夹</div>
+  </header>
+
+  <main class="app-shell">
+    <section class="setup-view" id="setupCard">
+      <div class="hero-card">
+        <div>
+          <p class="eyebrow">Rep Start &amp; End</p>
+          <h2>选择视频文件夹，开始标注</h2>
+          <p class="hero-copy">可选受试者大文件夹（如 <code>P002</code>），会自动跳到还没标完的动作子文件夹。点<strong>「下一个视频」</strong>完成本组后，标完一个动作会进入下一个。CSV 仍写在各动作小文件夹里。</p>
+        </div>
+        <button class="btn primary xl" id="btnStart">开始标注</button>
+      </div>
+
+      <div class="setup-grid">
+        <article class="card step-card">
+          <div class="step-number">1</div>
+          <h3>选择文件夹</h3>
+          <div class="picker-row">
+            <input id="folderPath" type="text" placeholder="例如 /Users/mac/Downloads/P007" value="/Users/mac/Downloads/P007" />
+            <button class="btn secondary" id="btnBrowseFolder">浏览</button>
+          </div>
+        </article>
+
+        <article class="card step-card">
+          <div class="step-number">2</div>
+          <h3>说明</h3>
+          <p class="hint">选 <code>P002</code> 后自动进入未完成的动作文件夹。CSV 仍在小文件夹，例如 <code>A02-侧平板支撑/P002-A02-侧平板支撑_labels.csv</code>。</p>
+        </article>
+      </div>
+
+      <div class="setup-status" id="setupHint">请选择视频文件夹。</div>
+    </section>
+
+    <section class="workspace" id="workspace" hidden>
+      <div class="left-column">
+        <div class="card video-card">
+          <div class="video-header">
+            <div>
+              <p class="eyebrow">Current Video</p>
+              <h2 id="lblFilename">尚未加载</h2>
+              <p class="hint" id="lblOutputDir"></p>
+            </div>
+            <button class="btn ghost" id="btnBackSetup">返回设置</button>
+          </div>
+
+          <div class="video-picker-row" id="actionPickerRow" hidden>
+            <label for="actionPicker">动作文件夹</label>
+            <select id="actionPicker"></select>
+          </div>
+
+          <div class="video-picker-row">
+            <label for="videoPicker">切换视频</label>
+            <select id="videoPicker" disabled>
+              <option value="">— 请选择 —</option>
+            </select>
+          </div>
+
+          <div class="video-panel" id="videoPanel" tabindex="0">
+            <div class="video-wrap" id="videoWrap">
+              <video id="video" playsinline preload="auto"></video>
+              <div class="video-placeholder" id="videoPlaceholder">视频加载后显示在这里</div>
+            </div>
+            <div class="video-resize-handle" id="videoResizeHandle" title="上下拖动等比例缩放视频">
+              <span id="videoScaleLabel">缩放 100%</span>
+              <span class="handle-hint">↑ 缩小 · ↓ 放大</span>
+            </div>
+          </div>
+
+          <div class="annotate-bar">
+            <span class="sample-count-hint" id="repProgressHint">本视频已标 0 个 rep</span>
+            <button class="btn secondary" id="btnMarkStart" title="快捷键 [">标记开始 [</button>
+            <button class="btn success" id="btnMarkEnd" title="快捷键 ]">标记结束 ]</button>
+            <button class="btn ghost" id="btnClearMarkers">清除标记</button>
+          </div>
+
+          <input type="range" id="seekBar" min="0" max="1000" value="0" step="1" />
+
+          <div class="controls">
+            <button class="btn secondary" id="btnPrevVideo">上一个视频</button>
+            <button class="btn primary lg" id="btnPlay">播放</button>
+            <button class="btn secondary" id="btnNextVideo">下一个视频</button>
+          </div>
+
+          <div class="status-strip">
+            <div class="time-row">
+              <div class="time-box">
+                <span class="label">当前时间</span>
+                <span class="time hms" id="lblHms">00:00:00.000</span>
+              </div>
+              <div class="time-box accent">
+                <span class="label">当前帧号</span>
+                <span class="time sec" id="lblFrame">—</span>
+              </div>
+              <div class="time-box accent">
+                <span class="label">时间戳（秒）</span>
+                <span class="time sec" id="lblSec">—</span>
+              </div>
+            </div>
+            <div class="segment-markers">
+              <div class="marker-box start">
+                <span class="label">开始</span>
+                <strong id="lblStart">未标记</strong>
+              </div>
+              <div class="marker-box end">
+                <span class="label">结束</span>
+                <strong id="lblEnd">未标记</strong>
+              </div>
+            </div>
+          </div>
+
+          <p class="hint center shortcut-hint">空格 = 播放/暂停 · [ = 开始 · ] = 结束并写入 · ← → = 逐帧</p>
+
+          <div class="captures-panel">
+            <div class="captures-header">
+              <h3>已标 Rep</h3>
+              <span class="badge" id="segmentCount">0</span>
+            </div>
+            <div class="segments-list" id="segmentsList"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <aside class="right-column">
+        <div class="card form-card">
+          <div class="form-header">
+            <div>
+              <p class="eyebrow">Frame Info</p>
+              <h2>当前 Rep</h2>
+            </div>
+          </div>
+          <dl class="info-grid" id="captureInfo">
+            <div class="info-item"><dt>来源视频</dt><dd id="infoVideo">—</dd></div>
+            <div class="info-item"><dt>用户编号</dt><dd id="infoUser">—</dd></div>
+            <div class="info-item"><dt>Rep 序号</dt><dd id="infoAction">—</dd></div>
+            <div class="info-item"><dt>开始秒</dt><dd id="infoTimestamp">—</dd></div>
+            <div class="info-item"><dt>开始帧</dt><dd id="infoFrame">—</dd></div>
+            <div class="info-item"><dt>结束秒</dt><dd id="infoEndSec">—</dd></div>
+            <div class="info-item"><dt>结束帧</dt><dd id="infoEndFrame">—</dd></div>
+            <div class="info-item"><dt>标签</dt><dd id="infoTag">—</dd></div>
+            <div class="info-item"><dt>标注结果</dt><dd id="infoLabel">—</dd></div>
+          </dl>
+          <div class="form-actions">
+            <button class="btn danger outline" id="btnDeleteCapture" type="button">删除当前 Rep</button>
+          </div>
+          <p class="status" id="statusMsg"></p>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const HEADERS = {{ headers | tojson }};
+    const LABEL_CHOICES = {{ label_choices | tojson }};
+    const STYLE_CHOICES = {{ style_choices | tojson }};
+  </script>
+  <script src="static/app.js?v=39"></script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <base href="/nq-name/" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>采集视频快速命名</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="static/style.css?v=17" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">NAM</div>
+      <div>
+        <h1>非量化命名</h1>
+        <p>六段式命名 · 四机同步 · 标签显示名称+代号</p>
+      </div>
+    </div>
+    <a class="btn ghost" href="/">返回首页</a>
+    <div class="progress-chip" id="progressChip">等待选择视频文件夹</div>
+  </header>
+
+  <main class="app-shell">
+    <section class="setup-view" id="setupCard">
+      <div class="hero-card">
+        <div>
+          <p class="eyebrow">Field Naming</p>
+          <h2>选择文件夹，逐条为视频命名</h2>
+          <p class="hero-copy">
+            公式：<code>{受试者}_{动作}_{侧别}_{标签}_{Rep}_{机位}.mp4</code>
+            · 无现场 checklist 时，可直接选受试者根目录（如 <code>P001</code>）。
+            四个机位按拍摄顺序对齐时，看一个机位即可，确认后同步改其余机位。
+          </p>
+        </div>
+        <button class="btn primary xl" id="btnStart">开始命名</button>
+      </div>
+
+      <div class="setup-grid two">
+        <article class="card step-card">
+          <div class="step-number">1</div>
+          <h3>选择视频文件夹</h3>
+          <div class="picker-row">
+            <input id="folderPath" type="text" placeholder="受试者根目录（P001）或其中一个机位文件夹" readonly />
+            <button class="btn secondary" id="btnBrowseFolder">浏览</button>
+          </div>
+        </article>
+
+        <article class="card step-card">
+          <div class="step-number">2</div>
+          <h3>命名说明</h3>
+          <p class="hint">
+            进入后逐条预览并点选字段。作废片点「本条作废」，四个机位同一序号会一起移入各机位下的「作废」文件夹。
+            快捷键：空格播放/暂停，Enter 确认，X 作废，← → 切换。
+          </p>
+        </article>
+      </div>
+
+      <article class="card sync-card" id="setupSyncCard" hidden>
+        <div class="sync-head">
+          <div>
+            <p class="eyebrow">Multi Camera</p>
+            <h3>检测到多机位，按顺序同步</h3>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="setupSyncToggle" checked />
+            <span>确认时同步改其他机位</span>
+          </label>
+        </div>
+        <div class="chip-row" id="setupCameraChips"></div>
+        <p class="hint" id="setupSyncHint"></p>
+      </article>
+
+      <div class="setup-status" id="setupHint">请选择视频文件夹。</div>
+    </section>
+
+    <section class="workspace" id="workspace" hidden>
+      <div class="left-column">
+        <div class="card video-card">
+          <div class="video-header">
+            <div>
+              <p class="eyebrow">Current Video</p>
+              <h2 id="lblFilename">尚未加载</h2>
+              <p class="hint" id="lblFolder"></p>
+            </div>
+            <button class="btn ghost" id="btnBackSetup">返回设置</button>
+          </div>
+          <div class="watch-row" id="watchRow" hidden>
+            <span class="rotate-label">主看机位</span>
+            <div class="chip-row" id="watchCameraChips"></div>
+            <label class="toggle compact">
+              <input type="checkbox" id="workSyncToggle" checked />
+              <span>同步其他机位</span>
+            </label>
+          </div>
+
+          <div class="video-stage" id="videoStage">
+            <video id="player" controls playsinline preload="auto"></video>
+          </div>
+          <p class="hint danger-text" id="videoError" hidden></p>
+
+          <div class="rotate-row">
+            <span class="rotate-label">旋转（同 QuickTime，不重编码）</span>
+            <button class="btn ghost sm" id="btnRotLeft" title="向左旋转 90°">向左旋转</button>
+            <button class="btn ghost sm" id="btnRotRight" title="向右旋转 90°">向右旋转</button>
+            <button class="btn ghost sm" id="btnRotReset" title="恢复为文件原始方向">复位</button>
+            <span class="hint" id="rotAngleHint">转正后点「确认命名」会另存为新文件</span>
+          </div>
+
+          <div class="nav-row">
+            <button class="btn secondary" id="btnPrev">上一条</button>
+            <button class="btn secondary" id="btnNext">下一条</button>
+            <button class="btn ghost" id="btnSkipNamed" title="跳到下一个尚未符合六段式命名的视频">跳过已命名</button>
+            <button class="btn ghost" id="btnVoid" title="作废片不改名，进入下一条；同步开启时其他机位对应条也保持原名">本条作废</button>
+            <button class="btn secondary" id="btnOpenNative" title="用 QuickTime / 系统默认应用打开 .mov">系统播放器打开</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-column">
+        <div class="card form-card">
+          <div class="form-header">
+            <div>
+              <p class="eyebrow">Name Fields</p>
+              <h2>填写命名字段</h2>
+            </div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-title">1. 受试者编号</div>
+            <input id="subjectInput" type="text" placeholder="例如 5 或 P005" />
+          </div>
+
+          <div class="field-block">
+            <div class="field-title">2. 动作代码</div>
+            <div class="chip-grid" id="actionChips"></div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-title">3. 侧别</div>
+            <div class="chip-row" id="sideChips"></div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-title">4. 标签 · 错误类型 <span class="soft">界面显示名称+代号，文件名只写代号</span></div>
+            <div class="chip-grid" id="errorChips"></div>
+          </div>
+
+          <div class="field-block twin">
+            <div>
+              <div class="field-title">5. Rep 序号</div>
+              <div class="rep-row">
+                <button class="btn ghost sm" id="btnRepMinus">−</button>
+                <input id="repInput" type="text" value="V01" />
+                <button class="btn ghost sm" id="btnRepPlus">+</button>
+              </div>
+            </div>
+            <div>
+              <div class="field-title">6. 机位 <span class="soft">同步时由文件夹决定，勿手改</span></div>
+              <div class="chip-row" id="cameraChips"></div>
+            </div>
+          </div>
+
+          <div class="preview-box">
+            <div class="preview-label">将写入的文件名（仅代号）</div>
+            <code id="namePreview">—</code>
+            <div class="preview-hint" id="previewHint"></div>
+            <div class="sync-preview" id="syncPreview" hidden></div>
+          </div>
+
+          <div class="action-row">
+            <button class="btn primary xl block" id="btnRename">确认命名并下一条</button>
+          </div>
+          <div class="status-msg" id="statusMsg"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="static/app.js?v=17"></script>
+</body>
+</html>

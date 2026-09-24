@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <base href="/q-name/" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>量化命名</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="static/style.css?v=2" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">QN</div>
+      <div>
+        <h1>量化命名</h1>
+        <p>粗命名 · 四机同步 · 做法只写对照表</p>
+      </div>
+    </div>
+    <a class="btn ghost" href="/">返回首页</a>
+    <div class="progress-chip" id="progressChip">等待选择视频文件夹</div>
+  </header>
+
+  <main class="app-shell">
+    <section class="setup-view" id="setupCard">
+      <div class="hero-card">
+        <div>
+          <p class="eyebrow">Quantitative Naming</p>
+          <h2>选择文件夹，逐条粗命名</h2>
+          <p class="hero-copy">
+            文件名：<code>{动作}_s{用户}_t{序号}_{机位}</code>，例如 <code>sq_s004_t01_c0.mov</code>。
+            目标做法不进文件名，写进受试者根目录的 <code>对照表.csv</code>。
+            最终的 <code>sq_s004_r001_c0</code> 留到量化标注切分时再生成。
+          </p>
+        </div>
+        <button class="btn primary xl" id="btnStart">开始命名</button>
+      </div>
+
+      <div class="setup-grid two">
+        <article class="card step-card">
+          <div class="step-number">1</div>
+          <h3>选择视频文件夹</h3>
+          <div class="picker-row">
+            <input id="folderPath" type="text" placeholder="S004 根目录，或 c0 / 现场原视频/c90" readonly />
+            <button class="btn secondary" id="btnBrowseFolder">浏览</button>
+          </div>
+        </article>
+        <article class="card step-card">
+          <div class="step-number">2</div>
+          <h3>命名说明</h3>
+          <p class="hint">
+            看一个机位即可。确认后四个机位按同一条序号一起改名，并写对照表。
+            作废会把四机同一条移入各自的「作废」文件夹，对照表记「保留=否」。
+            快捷键：空格播放/暂停，Enter 确认，X 作废，← → 切换。
+          </p>
+        </article>
+      </div>
+
+      <article class="card sync-card" id="setupSyncCard" hidden>
+        <div class="sync-head">
+          <div>
+            <p class="eyebrow">Multi Camera</p>
+            <h3>检测到多机位，按顺序同步</h3>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="setupSyncToggle" checked />
+            <span>确认时同步改其他机位</span>
+          </label>
+        </div>
+        <div class="chip-row" id="setupCameraChips"></div>
+        <p class="hint" id="setupSyncHint"></p>
+      </article>
+      <div class="setup-status" id="setupHint">请选择视频文件夹。</div>
+    </section>
+
+    <section class="workspace" id="workspace" hidden>
+      <div class="left-column">
+        <div class="card video-card">
+          <div class="video-header">
+            <div>
+              <p class="eyebrow">Current Video</p>
+              <h2 id="lblFilename">尚未加载</h2>
+              <p class="hint" id="lblFolder"></p>
+            </div>
+            <button class="btn ghost" id="btnBackSetup">返回设置</button>
+          </div>
+          <div class="watch-row" id="watchRow" hidden>
+            <span class="rotate-label">主看机位</span>
+            <div class="chip-row" id="watchCameraChips"></div>
+            <label class="toggle compact">
+              <input type="checkbox" id="workSyncToggle" checked />
+              <span>同步其他机位</span>
+            </label>
+          </div>
+          <div class="video-stage" id="videoStage">
+            <video id="player" controls playsinline preload="auto"></video>
+          </div>
+          <p class="hint danger-text" id="videoError" hidden></p>
+          <div class="rotate-row">
+            <span class="rotate-label">旋转（同 QuickTime，不重编码）</span>
+            <button class="btn ghost sm" id="btnRotLeft">向左旋转</button>
+            <button class="btn ghost sm" id="btnRotRight">向右旋转</button>
+            <button class="btn ghost sm" id="btnRotReset">复位</button>
+            <span class="hint" id="rotAngleHint">转正后点「确认命名」会另存为新文件</span>
+          </div>
+          <div class="nav-row">
+            <button class="btn secondary" id="btnPrev">上一条</button>
+            <button class="btn secondary" id="btnNext">下一条</button>
+            <button class="btn ghost" id="btnSkipNamed">跳过已命名</button>
+            <button class="btn ghost" id="btnVoid">本条作废</button>
+            <button class="btn secondary" id="btnOpenNative">系统播放器打开</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-column">
+        <div class="card form-card">
+          <div class="form-header">
+            <div>
+              <p class="eyebrow">Name Fields</p>
+              <h2>点选字段</h2>
+            </div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-title">1. 用户编号</div>
+            <input id="userInput" type="text" placeholder="例如 4 或 s004" value="s004" />
+          </div>
+          <div class="field-block">
+            <div class="field-title">2. 动作</div>
+            <div class="chip-grid" id="actionChips"></div>
+          </div>
+          <div class="field-block">
+            <div class="field-title">3. 支撑 / 发力侧</div>
+            <div class="chip-row" id="sideChips"></div>
+          </div>
+          <div class="field-block">
+            <div class="field-title">4. 目标做法 <span class="soft">不写入文件名</span></div>
+            <div class="chip-grid" id="practiceChips"></div>
+            <p class="hint" id="practiceHint"></p>
+          </div>
+          <div class="field-block twin">
+            <div>
+              <div class="field-title">5. 现场序号 t</div>
+              <div class="rep-row">
+                <button class="btn ghost sm" id="btnTakeMinus">−</button>
+                <input id="takeInput" type="text" value="t01" />
+                <button class="btn ghost sm" id="btnTakePlus">+</button>
+              </div>
+            </div>
+            <div>
+              <div class="field-title">6. 切分后建议 r <span class="soft">只进对照表</span></div>
+              <input id="rInput" type="text" placeholder="r017 或 r001-r005" />
+            </div>
+          </div>
+
+          <div class="preview-box">
+            <div class="preview-label">将写入的文件名</div>
+            <code id="namePreview">—</code>
+            <div class="preview-hint" id="previewHint"></div>
+            <div class="sync-preview" id="syncPreview" hidden></div>
+          </div>
+          <div class="action-row">
+            <button class="btn primary xl block" id="btnRename">确认命名并下一条</button>
+          </div>
+          <div class="status-msg" id="statusMsg"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="static/app.js?v=1"></script>
+</body>
+</html>
