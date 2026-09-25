@@ -58,15 +58,11 @@ cfg = {
 }
 
 
-def run_osascript(script: str) -> str:
-    result = subprocess.run(["osascript", "-e", script], check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or "已取消选择").strip())
-    return result.stdout.strip()
+from pick_path import clean_user_path, pick_folder
 
 
 def apply_selected_path(raw: str) -> None:
-    found = discover(raw)
+    found = discover(clean_user_path(raw))
     cfg["folder"] = str(found["watch_folder"])
     cfg["session_root"] = str(found["session_root"])
     cfg["watch_cam"] = found["watch_cam"]
@@ -166,7 +162,7 @@ def get_config():
 def set_config():
     data = request.get_json(force=True) or {}
     if data.get("folder"):
-        folder = str(data.get("folder") or "").strip()
+        folder = clean_user_path(data.get("folder") or "")
         if folder and not Path(folder).is_dir():
             return jsonify({"ok": False, "error": "视频文件夹不存在"}), 400
         apply_selected_path(folder)
@@ -183,9 +179,7 @@ def set_config():
 @app.post("/api/browse/folder")
 def browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择受试者根目录（如 S004）或其中一个机位文件夹")'
-        )
+        path = pick_folder("选择受试者根目录（如 S004）或其中一个机位文件夹")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     apply_selected_path(path.rstrip("/"))

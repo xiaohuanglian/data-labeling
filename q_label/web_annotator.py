@@ -10,13 +10,14 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import threading
 import uuid
 import webbrowser
 from pathlib import Path
 from queue import Queue
 from urllib.parse import unquote
+
+from pick_path import clean_user_path, pick_file, pick_folder
 
 import cv2
 from flask import Flask, jsonify, render_template, request, send_file
@@ -175,18 +176,6 @@ def normalize_action_code(raw: str) -> str:
     raw = (raw or "bd").strip().lower()
     raw = re.sub(r"[^a-z0-9]+", "", raw)
     return raw or "bd"
-
-
-def run_osascript(script: str) -> str:
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or "已取消选择").strip())
-    return result.stdout.strip()
 
 
 def read_csv_rows(csv_path: Path, headers: list[str]) -> list[dict[str, str]]:
@@ -843,9 +832,7 @@ def label_set_config():
 @app.post("/api/label/browse/folder")
 def label_browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择包含视频的文件夹")'
-        )
+        path = pick_folder("选择包含视频的文件夹")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     label_cfg["folder"] = path
@@ -855,9 +842,7 @@ def label_browse_folder():
 @app.post("/api/label/browse/csv")
 def label_browse_csv():
     try:
-        path = run_osascript(
-            'POSIX path of (choose file with prompt "选择 CSV 文件" of type {"csv"})'
-        )
+        path = pick_file("选择 CSV 文件")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     ensure_csv(Path(path), LABEL_CSV_HEADERS)
@@ -1034,9 +1019,7 @@ def capture_set_config():
 @app.post("/api/capture/browse/folder")
 def capture_browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择包含视频的文件夹")'
-        )
+        path = pick_folder("选择包含视频的文件夹")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     capture_cfg["folder"] = path
@@ -1046,9 +1029,7 @@ def capture_browse_folder():
 @app.post("/api/capture/browse/output")
 def capture_browse_output():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择截帧输出根目录")'
-        )
+        path = pick_folder("选择截帧输出根目录")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -1287,9 +1268,7 @@ def sequence_mark_done():
 @app.post("/api/sequence/browse/folder")
 def sequence_browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择包含视频的文件夹")'
-        )
+        path = pick_folder("选择包含视频的文件夹")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     sequence_cfg["folder"] = path
@@ -1299,9 +1278,7 @@ def sequence_browse_folder():
 @app.post("/api/sequence/browse/output")
 def sequence_browse_output():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择序列抽帧输出根目录")'
-        )
+        path = pick_folder("选择序列抽帧输出根目录")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -1636,7 +1613,7 @@ def _offline_takes_payload() -> list[dict]:
 
 
 def _set_offline_cam_folder(raw: str) -> dict:
-    root, cam_dir, cam = offline_cut.resolve_cam_session(Path(raw))
+    root, cam_dir, cam = offline_cut.resolve_cam_session(Path(clean_user_path(raw)))
     offline_cfg["folder"] = str(cam_dir)
     offline_cfg["output"] = str(root)
     offline_cfg["root"] = str(root)
@@ -1691,9 +1668,7 @@ def offline_set_config():
 @app.post("/api/offline/browse/folder")
 def offline_browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择机位文件夹，例如 S004/现场原视频/c90")'
-        ).rstrip("/")
+        path = pick_folder("选择机位文件夹，例如 S004/现场原视频/c90")
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
     try:
@@ -1718,9 +1693,7 @@ def offline_browse_folder():
 @app.post("/api/offline/browse/output")
 def offline_browse_output():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择切分输出目录")'
-        ).rstrip("/")
+        path = pick_folder("选择切分输出目录")
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
     offline_cfg["output"] = path

@@ -7,7 +7,6 @@ from __future__ import annotations
 import csv
 import os
 import re
-import subprocess
 import webbrowser
 from pathlib import Path
 from urllib.parse import unquote
@@ -65,21 +64,7 @@ def normalize_user_id(raw: str) -> str:
     return raw
 
 
-def run_osascript(script: str) -> str:
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        if "User canceled" in stderr or "用户已取消" in stderr or "(-128)" in stderr:
-            raise RuntimeError("已取消选择")
-        raise RuntimeError(
-            "无法打开系统文件夹选择器。请把路径直接贴进输入框，例如 /Users/mac/Downloads/P007"
-        )
-    return result.stdout.strip()
+from pick_path import clean_user_path, pick_folder
 
 
 NAME_RE = re.compile(
@@ -508,7 +493,7 @@ def next_incomplete_folder(current: Path, direction: int = 1) -> Path | None:
 
 
 def apply_selected_path(raw: str) -> None:
-    path = Path((raw or "").strip())
+    path = Path(clean_user_path(raw))
     if not path.is_dir():
         raise ValueError("视频文件夹不存在")
     videos_here = list_videos(path)
@@ -597,7 +582,7 @@ def videos_status():
 def set_config():
     data = request.get_json(force=True) or {}
     if "folder" in data:
-        folder = data["folder"].strip()
+        folder = clean_user_path(data["folder"])
         if folder:
             try:
                 apply_selected_path(folder)
@@ -634,9 +619,7 @@ def switch_folder():
 @app.post("/api/browse/folder")
 def browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择受试者文件夹（如 P002）或单个动作文件夹")'
-        )
+        path = pick_folder("选择受试者文件夹（如 P002）或单个动作文件夹")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     try:
@@ -650,9 +633,7 @@ def browse_folder():
 @app.post("/api/browse/output")
 def browse_output():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择标注输出根目录")'
-        )
+        path = pick_folder("选择标注输出根目录")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     Path(path).mkdir(parents=True, exist_ok=True)

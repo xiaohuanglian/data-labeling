@@ -511,10 +511,12 @@ async function refreshConfig() {
 }
 
 async function startWorkspace() {
-  if (!state.folder) {
-    $("setupHint").textContent = "请先选择视频文件夹。";
+  const typed = $("folderPath").value.trim();
+  if (!typed) {
+    $("setupHint").textContent = "请先选择视频文件夹，或把路径粘贴到输入框。";
     return;
   }
+  await post("api/config", { folder: typed });
   await refreshConfig();
   if (!state.videos.length) {
     $("setupHint").textContent = "该文件夹内没有可识别的视频文件（优先支持 mov，也支持 mp4/m4v 等）。";
@@ -642,12 +644,18 @@ function bumpRep(delta) {
 
 function bindEvents() {
   $("btnBrowseFolder").addEventListener("click", async () => {
+    const btn = $("btnBrowseFolder");
+    btn.disabled = true;
+    $("setupHint").textContent = "请在弹出的窗口里选择文件夹。";
     try {
       const data = await post("api/browse/folder");
       $("folderPath").value = data.path || "";
       await refreshConfig();
     } catch (err) {
-      $("setupHint").textContent = err.message || String(err);
+      const msg = err.message || String(err);
+      $("setupHint").textContent = msg.includes("没有选择") ? "请选择视频文件夹。" : msg;
+    } finally {
+      btn.disabled = false;
     }
   });
 
@@ -706,7 +714,7 @@ function bindEvents() {
     const video = currentVideo();
     showVideoError(
       video
-        ? `浏览器无法解码 ${video.filename}（常见于 HEVC 的 .mov）。请点「系统播放器打开」，或用 Safari 打开本工具。`
+        ? `浏览器无法解码 ${video.filename}（常见于 iPhone 的 HEVC）。请回首页，先做「iPhone 转码」。`
         : "无法播放当前视频",
     );
   });

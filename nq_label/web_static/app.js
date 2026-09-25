@@ -600,6 +600,7 @@ async function applyConfig() {
 }
 
 async function browseFolder() {
+  $("setupHint").textContent = "请在弹出的窗口里选择文件夹。";
   const res = await post("api/browse/folder");
   applyLoadedConfig(res);
 }
@@ -775,10 +776,11 @@ function bindEvents() {
 
   $("btnBrowseFolder").onclick = () => browseFolder().catch((e) => {
     const msg = String(e.message || "");
-    if (msg.includes("已取消")) return;
-    alert(msg.includes("无法打开系统文件夹选择器")
-      ? msg
-      : "无法打开系统文件夹选择器。请把路径直接贴进输入框，例如 /Users/mac/Downloads/P007");
+    if (!msg || msg.includes("没有选择") || msg.includes("已取消")) {
+      $("setupHint").textContent = "请选择视频文件夹。";
+      return;
+    }
+    alert(msg);
   });
   $("btnStart").onclick = () => startAnnotating().catch((e) => alert(e.message));
   $("btnPlay").onclick = togglePlay;

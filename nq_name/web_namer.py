@@ -66,16 +66,7 @@ CAMERA_TO_ANGLE = {v: k for k, v in ANGLE_TO_CAMERA.items()}
 CLIP_NO_RE = re.compile(r"_C(\d+)", re.IGNORECASE)
 
 
-def run_osascript(script: str) -> str:
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or "已取消选择").strip())
-    return result.stdout.strip()
+from pick_path import clean_user_path, pick_folder
 
 
 def clip_stamp(name: str) -> str:
@@ -139,7 +130,7 @@ def discover_camera_set(path: Path) -> list[dict]:
 
 def apply_selected_path(raw: str) -> None:
     """写入所选路径：若是受试者根目录则默认看 0° 机位。"""
-    folder = (raw or "").strip().rstrip("/")
+    folder = clean_user_path(raw)
     if not folder:
         cfg["folder"] = ""
         return
@@ -423,7 +414,7 @@ def get_config():
 def set_config():
     data = request.get_json(force=True) or {}
     if "folder" in data:
-        folder = (data.get("folder") or "").strip()
+        folder = clean_user_path(data.get("folder") or "")
         if folder and not Path(folder).is_dir():
             return jsonify({"ok": False, "error": "视频文件夹不存在"}), 400
         apply_selected_path(folder)
@@ -437,9 +428,7 @@ def set_config():
 @app.post("/api/browse/folder")
 def browse_folder():
     try:
-        path = run_osascript(
-            'POSIX path of (choose folder with prompt "选择受试者文件夹（如 P001）或其中一个机位文件夹")'
-        )
+        path = pick_folder("选择受试者文件夹（如 P001）或其中一个机位文件夹")
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     apply_selected_path(path.rstrip("/"))

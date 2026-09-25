@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>iPhone 转码</title>
+  <link rel="stylesheet" href="/home-static/home.css" />
+</head>
+<body>
+  <header>
+    <p class="eyebrow"><a href="/">数据标注</a></p>
+    <h1>iPhone 视频转成 Windows 能播的 MP4</h1>
+    <p class="lead">点「选择文件夹」。相机已设为「兼容性最佳」时，新视频是 H.264：MP4 会跳过，.mov 只换封装，很快。以前用「高效」拍的 HEVC 才会整段转码，比较久。原来的文件挪到同目录的 iphone原片。</p>
+  </header>
+  <main class="sheet">
+    <div class="row">
+      <input id="folder" placeholder="粘贴文件夹路径，例如 D:\采集\P001" />
+      <button class="secondary" id="browse" type="button">选择文件夹</button>
+    </div>
+    <button id="start" type="button">开始转换</button>
+    <p id="status"></p>
+    <ul id="log"></ul>
+  </main>
+  <script>
+    const folder = document.getElementById("folder");
+    const status = document.getElementById("status");
+    const log = document.getElementById("log");
+    const start = document.getElementById("start");
+    const browse = document.getElementById("browse");
+
+    function add(text, bad) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      if (bad) li.className = "bad";
+      log.appendChild(li);
+    }
+
+    browse.addEventListener("click", async () => {
+      status.textContent = "请在弹出的窗口里选择文件夹。";
+      const res = await fetch("/api/compat/browse", { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) {
+        status.textContent = data.error || "没有选择文件夹";
+        return;
+      }
+      folder.value = data.path;
+      status.textContent = "";
+    });
+
+    start.addEventListener("click", async () => {
+      const path = folder.value.trim();
+      if (!path) {
+        status.textContent = "先选文件夹";
+        return;
+      }
+      start.disabled = true;
+      browse.disabled = true;
+      log.replaceChildren();
+      status.textContent = "正在查看哪些视频需要转…";
+      try {
+        const scanRes = await fetch("/api/compat/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folder: path }),
+        });
+        const scan = await scanRes.json();
+        if (!scan.ok) throw new Error(scan.error || "扫描失败");
+        const todo = scan.items.filter((item) => item.action !== "skip");
+        const skipped = scan.items.length - todo.length;
+        if (!todo.length) {
+          status.textContent = scan.items.length
+            ? `这 ${scan.items.length} 个视频已经是普通 MP4，不用转。`
+            : "这个文件夹里没有视频。";
+          return;
+        }
+        let done = 0;
+        for (const item of todo) {
+          const label = item.action === "remux" ? "换封装" : "转码";
+          status.textContent = `${label} ${done + 1}/${todo.length}：${item.name}`;
+          const res = await fetch("/api/compat/convert", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: item.path }),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            add(`${item.name} 失败：${data.error || "未知错误"}`, true);
+          } else if (data.action === "skip") {
+            add(`${item.name} 已跳过`);
+          } else {
+            add(`${item.name} → ${data.output}`);
+          }
+          done += 1;
+        }
+        status.textContent = `完成。处理 ${todo.length} 个，跳过 ${skipped} 个。原文件在各自目录的 iphone原片 里。`;
+      } catch (err) {
+        status.textContent = err.message || String(err);
+      } finally {
+        start.disabled = false;
+        browse.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

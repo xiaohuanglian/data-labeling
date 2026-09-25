@@ -140,7 +140,7 @@ def resolve_cam_session(folder: Path) -> tuple[Path, Path, str]:
     current = Path(folder).expanduser().resolve()
     if current.name not in {"c0", "c90", "c180", "c270"}:
         raise RuntimeError(
-            "请选择某一个机位文件夹，例如 /Users/mac/Downloads/S004/现场原视频/c90。"
+            "请选择某一个机位文件夹，例如 D:\\采集\\S004\\现场原视频\\c90。"
             "对照表.csv 在 S004 根目录，只用来读视频信息，不会写入。"
         )
     root = current.parent

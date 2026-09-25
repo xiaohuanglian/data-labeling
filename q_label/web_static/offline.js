@@ -370,13 +370,19 @@ async function startWorkspace() {
 
 function bind() {
   $("btnBrowseFolder").onclick = async () => {
+    const btn = $("btnBrowseFolder");
+    btn.disabled = true;
+    $("setupHint").textContent = "请在弹出的窗口里选择机位文件夹。";
     try {
       const data = await post("/browse/folder");
       $("folderPath").value = data.path;
       state.cam = data.cam || state.cam;
       $("setupHint").textContent = data.hint || "已选择预览机位。导出时四机同步切，标注表写在上一级。";
     } catch (err) {
-      $("setupHint").textContent = err.message;
+      const msg = err.message || "";
+      $("setupHint").textContent = msg.includes("没有选择") ? "请选择机位文件夹。" : msg;
+    } finally {
+      btn.disabled = false;
     }
   };
   $("btnStart").onclick = async () => {

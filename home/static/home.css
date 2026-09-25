@@ -60,6 +60,8 @@ main {
   color: inherit;
 }
 
+.card.wide { grid-column: 1 / -1; }
+
 .card:hover { border-color: var(--accent); }
 
 .card span {
@@ -81,6 +83,62 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.92em;
 }
+
+main.sheet {
+  display: block;
+  max-width: 760px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+}
+
+button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #ccfbf1;
+  color: var(--accent);
+}
+
+button:disabled { opacity: 0.55; cursor: default; }
+
+#status { color: var(--muted); }
+
+#log {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+#log li {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+#log .bad { color: #b91c1c; }
+
+header a { color: var(--accent); text-decoration: none; }
 
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; }
