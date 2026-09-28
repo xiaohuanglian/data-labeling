@@ -19,6 +19,7 @@ const state = {
     practice: "标准平行蹲",
     take: 1,
     rRange: "",
+    camera: "c0",
   },
   fileRotationCcw: 0,
   desiredRotationCcw: 0,
@@ -63,6 +64,32 @@ function applyCssRotation(cssDegrees) {
   const stage = $("videoStage");
   if (!player || !stage) return;
   const deg = ((Number(cssDegrees) || 0) % 360 + 360) % 360;
+  const stageW = stage.clientWidth || 1;
+  const stageH = stage.clientHeight || 1;
+  const vw = player.videoWidth || 16;
+  const vh = player.videoHeight || 9;
+  const ratio = vw / Math.max(vh, 1);
+  let layoutW;
+  let layoutH;
+  if (deg === 90 || deg === 270) {
+    layoutH = Math.min(stageW, stageH / ratio);
+    layoutW = ratio * layoutH;
+  } else {
+    layoutW = Math.min(stageW, stageH * ratio);
+    layoutH = layoutW / ratio;
+    if (layoutH > stageH) {
+      layoutH = stageH;
+      layoutW = layoutH * ratio;
+    }
+  }
+  player.style.position = "absolute";
+  player.style.top = "50%";
+  player.style.left = "50%";
+  player.style.width = `${Math.max(1, layoutW)}px`;
+  player.style.height = `${Math.max(1, layoutH)}px`;
+  player.style.maxWidth = "none";
+  player.style.maxHeight = "none";
+  player.style.objectFit = "contain";
   player.style.transformOrigin = "center center";
   player.style.transform = deg ? `translate(-50%, -50%) rotate(${deg}deg)` : "translate(-50%, -50%)";
   const hint = $("rotAngleHint");
@@ -151,6 +178,17 @@ function renderFields() {
     state.form.practice = code;
     renderFields();
   });
+  const cameras = [
+    { code: "c0", name: "c0 · 0°" },
+    { code: "c90", name: "c90 · 90°" },
+    { code: "c180", name: "c180 · 180°" },
+    { code: "c270", name: "c270 · 270°" },
+  ];
+  if (!state.form.camera) state.form.camera = state.watchCamera || "c0";
+  renderChips($("cameraChips"), cameras, state.form.camera, (code) => {
+    state.form.camera = code;
+    updatePreview();
+  });
   $("practiceHint").textContent = action?.r_hint || "";
   $("userInput").value = state.form.user;
   $("takeInput").value = `t${String(state.form.take).padStart(2, "0")}`;
@@ -161,7 +199,7 @@ function renderFields() {
 function proposedName() {
   const user = normalizeUser($("userInput").value);
   const take = normalizeTake($("takeInput").value);
-  const cam = state.watchCamera || "c0";
+  const cam = state.form.camera || state.watchCamera || "c0";
   if (!user || !state.form.action) return "—";
   return `${state.form.action}_${user}_t${String(take).padStart(2, "0")}_${cam}`;
 }
@@ -225,6 +263,7 @@ function renderSetupSync() {
   $("workSyncToggle").checked = state.syncEnabled;
   renderCameraChips($("setupCameraChips"));
   renderCameraChips($("watchCameraChips"), (cam) => {
+    state.form.camera = cam;
     post("api/watch-camera", { camera: cam }).then(async () => {
       await refreshConfig();
       const first = state.videos.findIndex((item) => !item.named);
@@ -262,11 +301,13 @@ function applyParsed(video) {
   const parsed = video?.parsed;
   if (!parsed) {
     state.form.take = state.nextTake;
+    if (!state.form.camera) state.form.camera = state.watchCamera || "c0";
     return;
   }
   state.form.user = parsed.user;
   state.form.action = parsed.action;
   state.form.take = parsed.take;
+  if (parsed.cam) state.form.camera = parsed.cam;
   const action = actionMeta(parsed.action);
   if (action && !action.practices.includes(state.form.practice)) {
     state.form.practice = action.practices[0];
@@ -326,6 +367,7 @@ function formBody(filename) {
     practice: state.form.practice,
     take: normalizeTake($("takeInput").value),
     r_range: $("rInput").value.trim(),
+    camera: state.form.camera || "c0",
     display_rotation_ccw: state.desiredRotationCcw,
   };
 }
@@ -472,6 +514,12 @@ function bindEvents() {
     } catch (err) {
       setStatus(err.message, false);
     }
+  });
+  $("player").addEventListener("loadedmetadata", () => {
+    applyCssRotation(cssFromCcw(state.desiredRotationCcw));
+  });
+  window.addEventListener("resize", () => {
+    applyCssRotation(cssFromCcw(state.desiredRotationCcw));
   });
   $("player").addEventListener("error", () => {
     const video = currentVideo();

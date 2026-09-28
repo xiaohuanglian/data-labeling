@@ -337,9 +337,13 @@ def rename_videos():
         if item["missing"] or item["path"] is None:
             skipped.append(item["cam"])
             continue
-        cam = (item["cam"] or cfg.get("watch_cam") or "c0").lower()
-        stem = compose_stem(fields["action"]["code"], fields["user"], fields["take"], cam)
         is_current = item["path"].resolve() == current.resolve()
+        cam = (item["cam"] or cfg.get("watch_cam") or "c0").lower()
+        if is_current:
+            chosen = str(data.get("camera") or "").strip().lower()
+            if chosen in {"c0", "c90", "c180", "c270"}:
+                cam = chosen
+        stem = compose_stem(fields["action"]["code"], fields["user"], fields["take"], cam)
         try:
             result = apply_rename(item["path"], stem, desired_ccw if is_current else None)
         except FileExistsError as exc:

@@ -190,7 +190,7 @@ def load_takes(folder: Path) -> list[dict]:
                 "practice": (row.get("目标做法") or "").strip(),
                 "range_judgement": range_judgement(row.get("目标做法") or ""),
                 "r_start": r0,
-                "rep_count": 1 if kind == "static" else count,
+                "rep_count": count,
                 "kind": kind,
                 "review_cam": "",
             }
@@ -246,6 +246,35 @@ def read_progress(output: Path) -> dict:
     data.setdefault("done", [])
     data.setdefault("marks", {})
     return data
+
+
+def progress_key(take: int, cam: str) -> str:
+    return f"{int(take)}:{(cam or '').strip().lower()}"
+
+
+def is_take_done(done: list, take: int, cam: str) -> bool:
+    """完成按机位记。旧数据只有现场序号时，表示当时四机一起切过。"""
+    keys = {str(item) for item in done}
+    prefix = f"{int(take)}:"
+    if any(key.startswith(prefix) for key in keys):
+        return progress_key(take, cam) in keys
+    return str(int(take)) in keys
+
+
+def marks_for(marks: dict, take: int, cam: str, sync: bool = False) -> dict:
+    if not isinstance(marks, dict):
+        return {}
+    if sync:
+        shared = marks.get(str(int(take)))
+        return shared if isinstance(shared, dict) else {}
+    keyed = marks.get(progress_key(take, cam))
+    if isinstance(keyed, dict):
+        return keyed
+    prefix = f"{int(take)}:"
+    if any(str(key).startswith(prefix) for key in marks):
+        return {}
+    legacy = marks.get(str(int(take)))
+    return legacy if isinstance(legacy, dict) else {}
 
 
 def write_progress(output: Path, data: dict) -> None:
@@ -333,40 +362,32 @@ def remux_whole(src: Path, dst: Path) -> None:
         ])
 
 
-def build_segments(kind: str, starts: list[float], peaks: list[float], duration: float) -> list[dict]:
-    if kind == "static":
-        if len(peaks) != 1:
-            raise RuntimeError("静态动作只标 1 个正式峰值时间")
-        peak = float(peaks[0])
-        if peak < 0 or peak > duration + 0.05:
-            raise RuntimeError("峰值时间超出视频长度")
-        return [{"start": 0.0, "end": duration, "peak_src": peak, "peak_rel": round(peak, 3)}]
-
-    if len(starts) != len(peaks) or not starts:
-        raise RuntimeError(f"动态动作需要成对的起始点和峰值，当前起始 {len(starts)}、峰值 {len(peaks)}")
-    ordered = sorted(float(x) for x in starts)
+def build_segments(starts: list[float], ends: list[float], peaks: list[float], duration: float) -> list[dict]:
+    """每一段用自己的起始和结束，不延伸到下一段或视频末尾。"""
+    starts = [float(x) for x in starts]
+    ends = [float(x) for x in ends]
+    peaks = [float(x) for x in peaks]
+    if not starts or not (len(starts) == len(ends) == len(peaks)):
+        raise RuntimeError(
+            f"每一段都要有起始、结束和峰值。现在起始 {len(starts)}、结束 {len(ends)}、峰值 {len(peaks)}"
+        )
+    limit = float(duration) if duration and float(duration) > 0 else None
     segs = []
-    unused = sorted(float(x) for x in peaks)
-    for i, start in enumerate(ordered):
-        end = ordered[i + 1] if i + 1 < len(ordered) else duration
-        if end - start < 0.25:
-            raise RuntimeError(f"第 {i + 1} 段太短：{start:.3f} → {end:.3f}")
-        match = None
-        for peak in unused:
-            if start - 0.02 <= peak < end:
-                match = peak
-                break
-        if match is None:
-            raise RuntimeError(f"第 {i + 1} 段（{start:.3f}–{end:.3f}）没有峰值")
-        unused.remove(match)
+    for i, (start, end, peak) in enumerate(zip(starts, ends, peaks), start=1):
+        if end <= start:
+            raise RuntimeError(f"第 {i} 段结束要晚于起始：{start:.3f} → {end:.3f}")
+        if end - start < 0.05:
+            raise RuntimeError(f"第 {i} 段太短：{start:.3f} → {end:.3f}")
+        if limit is not None and (start < -0.05 or end > limit + 0.05):
+            raise RuntimeError(f"第 {i} 段超出视频长度")
+        if peak < start - 0.05 or peak > end + 0.05:
+            raise RuntimeError(f"第 {i} 段的峰值要落在起始和结束之间")
         segs.append({
             "start": start,
             "end": end,
-            "peak_src": match,
-            "peak_rel": round(match - start, 3),
+            "peak_src": peak,
+            "peak_rel": round(max(0.0, peak - start), 3),
         })
-    if unused:
-        raise RuntimeError("有峰值落在任何起始段之外")
     return segs
 
 
@@ -375,24 +396,17 @@ def export_take(
     output: Path,
     take_info: dict,
     starts: list[float],
+    ends: list[float],
     peaks: list[float],
     duration: float,
     user: dict,
     cam: str,
+    sync: bool = False,
 ) -> dict:
     if not take_info.get("keep"):
         raise RuntimeError("该条已标记作废，不导出")
 
-    kind = take_info["kind"]
-    expected = int(take_info["rep_count"])
-    if kind == "dynamic" and len(starts) != expected:
-        raise RuntimeError(f"这条应标 {expected} 个起始点，现在 {len(starts)} 个")
-    if kind == "static" and len(peaks) != 1:
-        raise RuntimeError("静态动作只需 1 个峰值")
-    if kind == "dynamic" and len(peaks) != expected:
-        raise RuntimeError(f"这条应标 {expected} 个峰值，现在 {len(peaks)} 个")
-
-    segs = build_segments(kind, starts, peaks, duration)
+    segs = build_segments(starts, ends, peaks, duration)
     user_id = (user.get("user_id") or "s004").strip().lower()
     action = take_info["action"]
     r0 = int(take_info["r_start"])
@@ -401,21 +415,26 @@ def export_take(
     label_rows = []
     missing = []
 
-    # 四个机位同步录制：只标一个视角，同一组时间点切四机
-    for cam_name in CAMS:
-        filename = take_info["files"].get(cam_name)
-        if not filename:
-            missing.append(cam_name)
-            continue
+    review = (cam or "").strip().lower()
+    if sync:
+        targets = [name for name in CAMS if take_info["files"].get(name)]
+        if not targets:
+            raise RuntimeError("没有可切的视频")
+    else:
+        if review not in CAMS:
+            raise RuntimeError("还没确定要切的机位")
+        if not take_info["files"].get(review):
+            raise RuntimeError(f"{review} 没有这条视频")
+        targets = [review]
+
+    for review_cam in targets:
+        filename = take_info["files"].get(review_cam)
         src = resolve_video(folder, filename)
         for idx, seg in enumerate(segs):
             r_no = r0 + idx
-            out_name = f"{action}_{user_id}_r{r_no:03d}_{cam_name}.mp4"
+            out_name = f"{action}_{user_id}_r{r_no:03d}_{review_cam}.mp4"
             dst = clips_dir / out_name
-            if kind == "static":
-                remux_whole(src, dst)
-            else:
-                cut_clip(src, dst, seg["start"], seg["end"])
+            cut_clip(src, dst, seg["start"], seg["end"])
             written.append(out_name)
             label_rows.append({
                 "文件名称": out_name,
@@ -435,23 +454,26 @@ def export_take(
                 "测量方法": user.get("measurement_method", "ruler"),
                 "测量可信度": user.get("measurement_confidence", "高"),
                 "是否有效": user.get("is_valid", "是"),
-                "备注": f"t{take_info['take']:02d};src_peak={seg['peak_src']:.3f};review={cam}",
+                "备注": f"t{take_info['take']:02d};src_peak={seg['peak_src']:.3f};review={review_cam}",
             })
 
     upsert_label_rows(output, label_rows)
     progress = read_progress(output)
-    done = set(str(x) for x in progress.get("done", []))
-    done.add(str(take_info["take"]))
-    progress["done"] = sorted(done, key=lambda x: int(x))
+    done = {str(item) for item in progress.get("done", [])}
+    for name in targets:
+        done.add(progress_key(take_info["take"], name))
+    progress["done"] = sorted(done, key=lambda item: (int(str(item).split(":", 1)[0] or 0), str(item)))
     progress.setdefault("marks", {})
-    progress["marks"][str(take_info["take"])] = {
+    mark_key = str(int(take_info["take"])) if sync else progress_key(take_info["take"], review)
+    progress["marks"][mark_key] = {
         "starts": starts,
+        "ends": ends,
         "peaks": peaks,
         "clips": written,
     }
     write_progress(output, progress)
     if not written:
-        raise RuntimeError("四个机位都没有可切的源视频")
+        raise RuntimeError(f"{review} 没有切出视频")
     return {
         "clips": written,
         "rows": len(label_rows),

@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>线下切分标注 - 视频标注工具</title>
-  <link rel="stylesheet" href="static/style.css?v=21" />
+  <link rel="stylesheet" href="static/style.css?v=22" />
 </head>
 <body>
   <header class="topbar">
@@ -28,7 +28,7 @@
         <div>
           <p class="eyebrow">Offline Cut + Label</p>
           <h2>按 checklist 切分，并自动带上做法和支撑侧</h2>
-          <p class="hero-copy">四机同步录制，只需选<strong>一个机位</strong>来看和标，例如 <strong>S004/现场原视频/c90</strong>。导出时同一组时间点会切齐四机。对照表.csv 只读；切出的短片在 <strong>处理后视频/</strong>，labels.csv 在 S004 根目录。</p>
+          <p class="hero-copy">选一个机位文件夹来看。剪切方式可选：不同步时只切当前这一条；同步时用同一组起止时间切对照表里有的各机位。每一段自己标起始和结束，没标的空白和不要的 rep 不会剪进去。对照表.csv 只读；短片在 <strong>处理后视频/</strong>。</p>
         </div>
         <button class="btn primary xl" id="btnStart">开始处理</button>
       </div>
@@ -42,6 +42,12 @@
             <input id="folderPath" type="text" placeholder="粘贴路径，例如 D:\采集\S004\现场原视频\c90" />
             <button class="btn secondary" id="btnBrowseFolder">浏览</button>
           </div>
+          <label class="hint">剪切方式
+            <select id="syncMode">
+              <option value="off" selected>不同步：只切当前这一条</option>
+              <option value="sync">同步：同一组时间切各机位</option>
+            </select>
+          </label>
         </article>
 
         <article class="card step-card">
@@ -116,12 +122,13 @@
           <div class="controls">
             <button class="btn secondary" id="btnPrevTake">上一条</button>
             <button class="btn primary lg" id="btnPlay">播放</button>
-            <button class="btn secondary" id="btnMarkStart">起始点 I</button>
+            <button class="btn secondary" id="btnMarkStart">起始 I</button>
+            <button class="btn secondary" id="btnMarkEnd">结束 E</button>
             <button class="btn secondary" id="btnMarkPeak">峰值 P</button>
             <button class="btn ghost" id="btnUndo">撤销</button>
             <button class="btn secondary" id="btnNextTake">下一条</button>
           </div>
-          <p class="hint center">空格播放 · I 起始点 · P 正式峰值 · Backspace 撤销 · Enter 交后台剪切并下一条 · ← → 逐帧</p>
+          <p class="hint center">空格播放 · I 起始 · E 结束 · P 峰值 · Backspace 撤销 · Enter 剪切并下一条 · ← → 逐帧。没标的段不会剪。</p>
         </div>
       </div>
 
@@ -155,6 +162,6 @@
       </aside>
     </section>
   </main>
-  <script src="static/offline.js?v=7"></script>
+  <script src="static/offline.js?v=9"></script>
 </body>
 </html>

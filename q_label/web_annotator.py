@@ -95,6 +95,7 @@ offline_cfg = {
     "output": "",
     "root": "",
     "cam": "",
+    "sync": False,
     "user": {
         "user_id": "s004",
         "height_cm": "169",
@@ -154,6 +155,7 @@ def _offline_jobs_payload() -> list[dict]:
         payload.append({
             "id": job["id"],
             "take": job["take"],
+            "cam": job.get("cam") or "",
             "status": job["status"],
             "error": job.get("error") or "",
             "result": job.get("result") or {},
@@ -1599,14 +1601,14 @@ def _offline_takes_payload() -> list[dict]:
         return []
     takes = offline_cut.load_takes(folder)
     progress = offline_cut.read_progress(output) if output else {"done": [], "marks": {}}
-    done = {str(x) for x in progress.get("done", [])}
+    done = progress.get("done") or []
     marks = progress.get("marks") or {}
     cam = offline_cfg.get("cam") or ""
     payload = []
     for item in takes:
         row = dict(item)
-        row["done"] = str(item["take"]) in done
-        row["marks"] = marks.get(str(item["take"]), {})
+        row["done"] = offline_cut.is_take_done(done, item["take"], cam)
+        row["marks"] = offline_cut.marks_for(marks, item["take"], cam, bool(offline_cfg.get("sync")))
         row["review_cam"] = cam or item.get("review_cam") or "c90"
         payload.append(row)
     return payload
@@ -1636,6 +1638,7 @@ def offline_get_config():
         "output": offline_cfg["output"],
         "root": offline_cfg.get("root", ""),
         "cam": offline_cfg.get("cam", ""),
+        "sync": bool(offline_cfg.get("sync")),
         "user": offline_cfg["user"],
         "takes": _offline_takes_payload(),
     })
@@ -1651,6 +1654,8 @@ def offline_set_config():
             return jsonify({"error": str(exc)}), 400
     if isinstance(data.get("user"), dict):
         offline_cfg["user"].update({k: str(v) for k, v in data["user"].items()})
+    if "sync" in data:
+        offline_cfg["sync"] = bool(data.get("sync"))
     try:
         takes = _offline_takes_payload()
     except Exception as exc:
@@ -1660,6 +1665,7 @@ def offline_set_config():
         "output": offline_cfg["output"],
         "root": offline_cfg.get("root", ""),
         "cam": offline_cfg.get("cam", ""),
+        "sync": bool(offline_cfg.get("sync")),
         "user": offline_cfg["user"],
         "takes": takes,
     })
@@ -1677,7 +1683,7 @@ def offline_browse_folder():
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
     hint = (
-        f"预览机位 {info['cam']}（只标这一机，导出时四机同步切）；"
+        f"预览机位 {info['cam']}（只切这一条视频，其他机位要各自再标）；"
         f"只读对照表 {info['lookup']}；"
         f"新建标注表 {info['csv_path']}；有效 {n} 条"
     )
@@ -1708,9 +1714,13 @@ def offline_save_marks():
         return jsonify({"error": "还没选输出目录"}), 400
     progress = offline_cut.read_progress(output)
     take = str(data.get("take") or "")
+    cam = offline_cfg.get("cam") or ""
     progress.setdefault("marks", {})
-    progress["marks"][take] = {
+    sync = bool(offline_cfg.get("sync"))
+    key = str(int(take)) if sync else offline_cut.progress_key(take, cam)
+    progress["marks"][key] = {
         "starts": data.get("starts") or [],
+        "ends": data.get("ends") or [],
         "peaks": data.get("peaks") or [],
     }
     offline_cut.write_progress(output, progress)
@@ -1769,30 +1779,29 @@ def offline_export():
         if isinstance(data.get("user"), dict):
             user.update({k: str(v) for k, v in data["user"].items()})
         starts = [float(x) for x in (data.get("starts") or [])]
+        ends = [float(x) for x in (data.get("ends") or [])]
         peaks = [float(x) for x in (data.get("peaks") or [])]
         duration = float(data.get("duration") or 0)
-        offline_cut.build_segments(info["kind"], starts, peaks, duration)
-        if info["kind"] == "dynamic" and len(starts) != int(info["rep_count"]):
-            raise RuntimeError(f"这条应标 {info['rep_count']} 个起始点，现在 {len(starts)} 个")
-        if info["kind"] == "static" and len(peaks) != 1:
-            raise RuntimeError("静态动作只需 1 个峰值")
-        if info["kind"] == "dynamic" and len(peaks) != int(info["rep_count"]):
-            raise RuntimeError(f"这条应标 {info['rep_count']} 个峰值，现在 {len(peaks)} 个")
+        if "sync" in data:
+            offline_cfg["sync"] = bool(data.get("sync"))
+        offline_cut.build_segments(starts, ends, peaks, duration)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
     take_no = int(data["take"])
+    cam = (offline_cfg.get("cam") or data.get("cam") or "").strip().lower()
     with offline_job_lock:
         busy = [
             job for job in offline_jobs.values()
-            if job["take"] == take_no and job["status"] in {"queued", "running"}
+            if job["take"] == take_no and (job.get("cam") or "") == cam and job["status"] in {"queued", "running"}
         ]
         if busy:
-            return jsonify({"error": f"t{take_no:02d} 正在后台剪切，不用再点导出"}), 409
+            return jsonify({"error": f"t{take_no:02d} {cam} 正在后台剪切，不用再点导出"}), 409
         job_id = uuid.uuid4().hex[:8]
         job = {
             "id": job_id,
             "take": take_no,
+            "cam": cam,
             "status": "queued",
             "error": "",
             "result": {},
@@ -1801,10 +1810,12 @@ def offline_export():
                 "output": output,
                 "take_info": info,
                 "starts": starts,
+                "ends": ends,
                 "peaks": peaks,
                 "duration": duration,
                 "user": user,
-                "cam": offline_cfg.get("cam") or data.get("cam") or "",
+                "cam": cam,
+                "sync": bool(offline_cfg.get("sync")),
             },
         }
         offline_jobs[job_id] = job

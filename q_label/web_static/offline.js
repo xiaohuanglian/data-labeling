@@ -11,10 +11,13 @@ const state = {
   playing: false,
   seeking: false,
   starts: [],
+  ends: [],
   peaks: [],
   history: [],
   jobs: {},
   pollTimer: null,
+  sync: false,
+  fps: 30,
 };
 
 function pad(n, w = 2) {
@@ -60,20 +63,26 @@ function currentTake() {
   return state.takes[state.index] || null;
 }
 
+function frameText(t) {
+  if (t == null || !Number.isFinite(Number(t))) return "—";
+  const frame = Math.max(0, Math.round(Number(t) * (state.fps || 30)));
+  return `${frame} 帧 · ${Number(t).toFixed(3)}s`;
+}
+
+function phase() {
+  if (state.ends.length < state.starts.length) return "end";
+  if (state.peaks.length < state.starts.length) return "peak";
+  return "start";
+}
+
 function nextPrompt() {
   const take = currentTake();
   if (!take) return "—";
-  if (take.kind === "static") {
-    return state.peaks.length ? "已标峰值，可导出" : "标 1 个正式峰值 P";
-  }
-  const need = take.rep_count;
-  if (state.starts.length < need) {
-    return `Rep ${state.starts.length + 1} 起始点 I`;
-  }
-  if (state.peaks.length < need) {
-    return `Rep ${state.peaks.length + 1} 峰值 P`;
-  }
-  return "已齐，可导出";
+  const step = phase();
+  const n = state.starts.length + (step === "start" ? 1 : 0);
+  if (step === "start") return `Rep ${n} 起始 I`;
+  if (step === "end") return `Rep ${state.starts.length} 结束 E`;
+  return `Rep ${state.starts.length} 峰值 P`;
 }
 
 function renderReps() {
@@ -81,21 +90,23 @@ function renderReps() {
   const box = $("repList");
   box.innerHTML = "";
   if (!take) return;
-  const n = take.kind === "static" ? 1 : take.rep_count;
-  $("markCount").textContent = `${state.starts.length + state.peaks.length} / ${take.kind === "static" ? 1 : n * 2}`;
+  const n = Math.max(state.starts.length, state.ends.length, state.peaks.length);
+  const done = state.starts.length && state.starts.length === state.ends.length && state.starts.length === state.peaks.length
+    ? state.starts.length
+    : Math.max(0, state.starts.length - (phase() === "start" ? 0 : 1));
+  $("markCount").textContent = `${done} 段 / 建议 ${take.rep_count}`;
   $("lblNextMark").textContent = nextPrompt();
   $("lblPrompt").textContent = nextPrompt();
 
   for (let i = 0; i < n; i += 1) {
-    const start = take.kind === "static" ? 0 : state.starts[i];
-    const peak = state.peaks[i];
     const row = document.createElement("div");
     row.className = "segment-row";
     const r = take.r_start + i;
     row.innerHTML = `
       <strong>r${String(r).padStart(3, "0")}</strong>
-      <span>起始 ${start == null ? "—" : start.toFixed(3)}</span>
-      <span>峰值 ${peak == null ? "—" : peak.toFixed(3)}</span>
+      <span>起始 ${frameText(state.starts[i])}</span>
+      <span>结束 ${frameText(state.ends[i])}</span>
+      <span>峰值 ${frameText(state.peaks[i])}</span>
     `;
     box.appendChild(row);
   }
@@ -104,16 +115,15 @@ function renderReps() {
 function fillTakeInfo() {
   const take = currentTake();
   if (!take) return;
-  $("kindBadge").textContent = take.kind === "static" ? "静态 · 不切" : "动态 · 要切";
+  $("kindBadge").textContent = state.sync ? "同步切各机位" : "只切当前视频";
   $("infoAction").textContent = `${take.action_cn} (${take.action})`;
   $("infoSide").textContent = take.side || "-";
   $("infoPractice").textContent = take.practice || "—";
   $("infoRange").textContent = take.range_judgement || "—";
-  const last = take.r_start + take.rep_count - 1;
-  $("infoR").textContent = `r${String(take.r_start).padStart(3, "0")}–r${String(last).padStart(3, "0")}`;
-  $("infoNeed").textContent = take.kind === "static" ? "1 个峰值" : `${take.rep_count} 起始 + ${take.rep_count} 峰值`;
+  $("infoR").textContent = `建议 r${String(take.r_start).padStart(3, "0")} 起，约 ${take.rep_count} 段`;
+  $("infoNeed").textContent = "每段：起始、结束、峰值。少标的不会剪";
   $("lblTakeMeta").textContent = `t${String(take.take).padStart(2, "0")} · ${take.keep ? "有效" : "作废"}`;
-  $("btnMarkStart").disabled = take.kind === "static";
+  $("btnMarkStart").disabled = false;
 }
 
 function userPayload() {
@@ -137,6 +147,7 @@ async function saveDraft() {
     await post("/marks", {
       take: take.take,
       starts: state.starts,
+      ends: state.ends,
       peaks: state.peaks,
     });
   } catch (_) {
@@ -146,44 +157,65 @@ async function saveDraft() {
 
 function markStart() {
   const take = currentTake();
-  if (!take || take.kind === "static") return;
-  if (state.starts.length >= take.rep_count) {
-    setStatus(`起始点已经 ${take.rep_count} 个`, false);
+  if (!take) return;
+  if (phase() !== "start") {
+    setStatus("先把当前这段的结束和峰值标完", false);
     return;
   }
   const t = currentTime();
   state.starts.push(t);
-  state.starts.sort((a, b) => a - b);
   state.history.push({ type: "start", value: t });
   renderReps();
   saveDraft();
-  setStatus(`起始点 ${t.toFixed(3)}s`);
+  setStatus(`起始 ${frameText(t)}`);
+}
+
+function markEnd() {
+  const take = currentTake();
+  if (!take) return;
+  if (phase() !== "end") {
+    setStatus("先标起始", false);
+    return;
+  }
+  const t = currentTime();
+  const start = state.starts[state.starts.length - 1];
+  if (t <= start) {
+    setStatus("结束要晚于起始", false);
+    return;
+  }
+  state.ends.push(t);
+  state.history.push({ type: "end", value: t });
+  renderReps();
+  saveDraft();
+  setStatus(`结束 ${frameText(t)}`);
 }
 
 function markPeak() {
   const take = currentTake();
   if (!take) return;
-  const need = take.kind === "static" ? 1 : take.rep_count;
-  if (take.kind === "dynamic" && state.starts.length < state.peaks.length + 1) {
-    setStatus("先标这个 rep 的起始点", false);
-    return;
-  }
-  if (state.peaks.length >= need) {
-    setStatus("峰值已经齐了", false);
+  if (phase() !== "peak") {
+    setStatus("先标这段的起始和结束", false);
     return;
   }
   const t = currentTime();
+  const i = state.peaks.length;
+  const start = state.starts[i];
+  const end = state.ends[i];
+  if (t < start - 0.05 || t > end + 0.05) {
+    setStatus("峰值要落在起始和结束之间", false);
+    return;
+  }
   state.peaks.push(t);
   state.history.push({ type: "peak", value: t });
   renderReps();
   saveDraft();
-  setStatus(`峰值 ${t.toFixed(3)}s`);
+  setStatus(`峰值 ${frameText(t)}`);
 }
 
 function undoMark() {
   const last = state.history.pop();
   if (!last) return;
-  const list = last.type === "start" ? state.starts : state.peaks;
+  const list = last.type === "start" ? state.starts : last.type === "end" ? state.ends : state.peaks;
   const idx = list.lastIndexOf(last.value);
   if (idx >= 0) list.splice(idx, 1);
   renderReps();
@@ -197,9 +229,14 @@ async function loadTake(index) {
   const take = currentTake();
   $("takePicker").value = String(index);
   state.cam = state.cam || take.review_cam;
-  if ($("lblCam")) $("lblCam").textContent = `预览 ${state.cam} · 导出同步四机`;
+  if ($("lblCam")) {
+    $("lblCam").textContent = state.sync
+      ? `预览 ${state.cam} · 同步切各机位`
+      : `预览 ${state.cam} · 只切这一条`;
+  }
   const draft = take.marks || {};
   state.starts = Array.isArray(draft.starts) ? draft.starts.map(Number) : [];
+  state.ends = Array.isArray(draft.ends) ? draft.ends.map(Number) : [];
   state.peaks = Array.isArray(draft.peaks) ? draft.peaks.map(Number) : [];
   state.history = [];
   fillTakeInfo();
@@ -221,6 +258,7 @@ async function loadVideo() {
   $("lblFilename").textContent = filename;
   try {
     const meta = await api(`/video/${take.take}/${state.cam}/meta`);
+    state.fps = Number(meta.fps) || 30;
     state.duration = Number(meta.duration) || 0;
   } catch (err) {
     setStatus(err.message, false);
@@ -237,17 +275,20 @@ function tick() {
 }
 
 function jobOf(takeNo) {
-  return state.jobs[String(takeNo)] || null;
+  const cam = state.cam || "";
+  return state.jobs[`${cam}:${takeNo}`] || null;
 }
 
 function applyJobs(jobs) {
   const map = {};
+  const cam = state.cam || "";
   (jobs || []).forEach((job) => {
-    map[String(job.take)] = job;
+    if ((job.cam || "") !== cam) return;
+    map[`${cam}:${job.take}`] = job;
   });
   state.jobs = map;
   state.takes.forEach((take) => {
-    const job = map[String(take.take)];
+    const job = map[`${cam}:${take.take}`];
     if (!job) return;
     if (job.status === "done") {
       take.done = true;
@@ -260,8 +301,9 @@ function applyJobs(jobs) {
     }
   });
   refreshTakePicker();
-  const failed = (jobs || []).filter((j) => j.status === "error");
-  const running = (jobs || []).filter((j) => j.status === "queued" || j.status === "running");
+  const mine = (jobs || []).filter((j) => (j.cam || "") === cam);
+  const failed = mine.filter((j) => j.status === "error");
+  const running = mine.filter((j) => j.status === "queued" || j.status === "running");
   if (failed.length) {
     const last = failed[failed.length - 1];
     setStatus(`t${String(last.take).padStart(2, "0")} 剪切失败：${last.error}`, false);
@@ -272,7 +314,7 @@ function applyJobs(jobs) {
   if (!running.length && state.pollTimer) {
     clearInterval(state.pollTimer);
     state.pollTimer = null;
-    const lastDone = (jobs || []).filter((j) => j.status === "done").pop();
+    const lastDone = mine.filter((j) => j.status === "done").pop();
     if (lastDone && lastDone.result) {
       const miss = (lastDone.result.missing || []).join("、");
       setStatus(
@@ -308,14 +350,18 @@ async function exportTake() {
     await post("/export", {
       take: take.take,
       starts: state.starts,
+      ends: state.ends,
       peaks: state.peaks,
       duration: state.duration,
+      sync: state.sync,
       user: userPayload(),
     });
     take.queued = true;
     take.done = false;
     refreshTakePicker();
-    setStatus(`t${String(take.take).padStart(2, "0")} 已交后台切四机，可直接标下一条`);
+    setStatus(state.sync
+      ? `t${String(take.take).padStart(2, "0")} 已交后台，按这组时间切各机位`
+      : `t${String(take.take).padStart(2, "0")} 已交后台，只切当前这一条`);
     startJobPoll();
     const next = state.takes.findIndex((t, i) => i > state.index && t.keep && !t.done && !t.queued);
     if (next >= 0) await loadTake(next);
@@ -344,11 +390,14 @@ function refreshTakePicker() {
 }
 
 async function startWorkspace() {
+  state.sync = $("syncMode").value === "sync";
   const cfg = await post("/config", {
     folder: $("folderPath").value,
     output: $("folderPath").value,
     user: userPayload(),
+    sync: state.sync,
   });
+  state.sync = Boolean(cfg.sync);
   state.takes = cfg.takes || [];
   state.cam = cfg.cam || state.cam;
   if (!state.takes.length) throw new Error("对照表里没有条目");
@@ -377,7 +426,7 @@ function bind() {
       const data = await post("/browse/folder");
       $("folderPath").value = data.path;
       state.cam = data.cam || state.cam;
-      $("setupHint").textContent = data.hint || "已选择预览机位。导出时四机同步切，标注表写在上一级。";
+      $("setupHint").textContent = data.hint || "已选择这一机。只切当前视频，其他机位要各自再标。";
     } catch (err) {
       const msg = err.message || "";
       $("setupHint").textContent = msg.includes("没有选择") ? "请选择机位文件夹。" : msg;
@@ -418,6 +467,7 @@ function bind() {
     state.seeking = false;
   });
   $("btnMarkStart").onclick = markStart;
+  $("btnMarkEnd").onclick = markEnd;
   $("btnMarkPeak").onclick = markPeak;
   $("btnUndo").onclick = undoMark;
   $("btnExport").onclick = exportTake;
@@ -449,6 +499,9 @@ function bind() {
     } else if (e.key === "i" || e.key === "I" || e.key === "[") {
       e.preventDefault();
       markStart();
+    } else if (e.key === "e" || e.key === "E" || e.key === "]") {
+      e.preventDefault();
+      markEnd();
     } else if (e.key === "p" || e.key === "P") {
       e.preventDefault();
       markPeak();
