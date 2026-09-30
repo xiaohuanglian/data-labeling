@@ -5,9 +5,12 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import shutil
 import subprocess
+import zipfile
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
 
@@ -118,6 +121,9 @@ def side_label(side: str) -> str:
 CAM_DIR_NAMES = {"c0", "c90", "c180", "c270", "作废"}
 ORIGINALS_DIR_NAME = "现场原视频"
 PROCESSED_DIR_NAME = "处理后视频"
+VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi"}
+SKIP_VIDEO_DIRS = {"处理后视频", "clips", "iphone原片", "作废"}
+_XLSX_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
 def originals_root(session_root: Path) -> Path:
@@ -135,21 +141,113 @@ def processed_dir(session_root: Path) -> Path:
     return new
 
 
+def _xlsx_column(ref: str) -> int:
+    index = 0
+    for ch in ref:
+        if not ch.isalpha():
+            break
+        index = index * 26 + (ord(ch.upper()) - 64)
+    return max(0, index - 1)
+
+
+def _read_xlsx_rows(path: Path) -> list[dict[str, str]]:
+    with zipfile.ZipFile(path) as book:
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in book.namelist():
+            root = ET.fromstring(book.read("xl/sharedStrings.xml"))
+            for item in root.findall("m:si", _XLSX_NS):
+                shared.append("".join(node.text or "" for node in item.findall(".//m:t", _XLSX_NS)))
+        sheet_name = next((name for name in book.namelist() if name.startswith("xl/worksheets/sheet")), "")
+        if not sheet_name:
+            raise RuntimeError(f"{path.name} 里没有工作表")
+        sheet = ET.fromstring(book.read(sheet_name))
+    grid: list[list[str]] = []
+    for row in sheet.findall("m:sheetData/m:row", _XLSX_NS):
+        values: list[str] = []
+        for cell in row.findall("m:c", _XLSX_NS):
+            index = _xlsx_column(cell.get("r") or "")
+            while len(values) < index:
+                values.append("")
+            kind = cell.get("t")
+            if kind == "inlineStr":
+                inline = cell.find("m:is", _XLSX_NS)
+                text = "".join(node.text or "" for node in inline.findall(".//m:t", _XLSX_NS)) if inline is not None else ""
+            else:
+                node = cell.find("m:v", _XLSX_NS)
+                raw = "" if node is None or node.text is None else node.text
+                text = shared[int(raw)] if kind == "s" and raw.isdigit() and int(raw) < len(shared) else raw
+            values.append(text)
+        grid.append(values)
+    if not grid:
+        return []
+    headers = [(cell or "").strip() for cell in grid[0]]
+    rows = []
+    for values in grid[1:]:
+        if not any((cell or "").strip() for cell in values):
+            continue
+        rows.append({headers[i]: (values[i] if i < len(values) else "").strip() for i in range(len(headers)) if headers[i]})
+    return rows
+
+
+def _headers_ok(rows: list[dict[str, str]]) -> bool:
+    if not rows:
+        return False
+    return any("现场序号" in (key or "") for key in rows[0])
+
+
+def read_lookup_rows(path: Path) -> list[dict[str, str]]:
+    if path.suffix.lower() == ".xlsx":
+        rows = _read_xlsx_rows(path)
+        if rows and not _headers_ok(rows):
+            raise RuntimeError(f"{path.name} 里没有「现场序号」这一列")
+        return rows
+    raw = path.read_bytes()
+    chosen: list[dict[str, str]] | None = None
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            text = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        lines = text.splitlines()
+        if lines and lines[0].lower().startswith("sep="):
+            text = "\n".join(lines[1:])
+        rows = [{key: (value or "").strip() for key, value in row.items() if key} for row in csv.DictReader(io.StringIO(text))]
+        chosen = rows
+        if _headers_ok(rows) or (not rows and "现场序号" in text):
+            return rows
+    if chosen is not None and chosen and not _headers_ok(chosen):
+        raise RuntimeError(f"{path.name} 里没有「现场序号」这一列。请用命名工具写出的对照表，不要改掉表头。")
+    return chosen or []
+
+
+def find_lookup(folder: Path) -> Path | None:
+    current = Path(folder)
+    for _ in range(4):
+        csv_hit = current / "对照表.csv"
+        if csv_hit.is_file():
+            return csv_hit
+        xlsx_hit = current / "对照表.xlsx"
+        if xlsx_hit.is_file():
+            return xlsx_hit
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
 def resolve_cam_session(folder: Path) -> tuple[Path, Path, str]:
-    """必须选机位文件夹（如 S004/现场原视频/c90）。对照表在会话根目录，只读。"""
+    """所选文件夹就是工作目录。对照表可以在这一层，也可以在往上三级里。"""
     current = Path(folder).expanduser().resolve()
-    if current.name not in {"c0", "c90", "c180", "c270"}:
+    if not current.is_dir():
+        raise RuntimeError(f"找不到文件夹：{folder}")
+    lookup = find_lookup(current)
+    if lookup is None:
         raise RuntimeError(
-            "请选择某一个机位文件夹，例如 D:\\采集\\S004\\现场原视频\\c90。"
-            "对照表.csv 在 S004 根目录，只用来读视频信息，不会写入。"
+            f"在 {current} 以及它的上三级里都没有找到对照表.csv。"
+            "视频和对照表放在一起即可，不需要按机位拆文件夹。"
         )
-    root = current.parent
-    if not (root / "对照表.csv").is_file() and (root.parent / "对照表.csv").is_file():
-        root = root.parent
-    lookup = root / "对照表.csv"
-    if not lookup.is_file():
-        raise RuntimeError(f"找不到对照表.csv（只读，不会改它）：{lookup}")
-    return root, current, current.name
+    cam = current.name if current.name in {"c0", "c90", "c180", "c270"} else ""
+    return lookup.parent, current, cam
 
 
 def resolve_session_root(folder: Path) -> Path:
@@ -158,13 +256,12 @@ def resolve_session_root(folder: Path) -> Path:
 
 
 def load_takes(folder: Path) -> list[dict]:
-    root = resolve_session_root(folder)
-    csv_path = root / "对照表.csv"
+    root, selected, folder_cam = resolve_cam_session(folder)
+    lookup = find_lookup(selected) or (root / "对照表.csv")
 
     grouped: dict[int, dict] = {}
     files: dict[int, dict[str, str]] = defaultdict(dict)
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        for row in csv.DictReader(f):
+    for row in read_lookup_rows(lookup):
             keep = (row.get("保留") or "").strip()
             try:
                 take = int(row.get("现场序号") or 0)
@@ -199,34 +296,68 @@ def load_takes(folder: Path) -> list[dict]:
     for take in sorted(grouped):
         item = grouped[take]
         item["files"] = files.get(take, {})
-        if item["keep"] and len(item["files"]) < 4:
-            missing = [c for c in CAMS if c not in item["files"]]
-            item["note"] = f"缺机位: {','.join(missing)}"
+        review = ""
+        if folder_cam and item["files"].get(folder_cam):
+            review = folder_cam
+        else:
+            for cam_name in CAMS:
+                if item["files"].get(cam_name):
+                    review = cam_name
+                    break
+        item["review_cam"] = review
+        name = item["files"].get(review) or ""
+        item["present"] = bool(name and locate_video(folder, name, selected_only=bool(folder_cam)))
         takes.append(item)
     return takes
+
+
+def _skipped_video(path: Path, base: Path) -> bool:
+    try:
+        relative = path.relative_to(base)
+    except ValueError:
+        return False
+    return any(part in SKIP_VIDEO_DIRS for part in relative.parts[:-1])
+
+
+def _same_video(path: Path, filename: str) -> bool:
+    wanted = Path(filename)
+    if path.name.casefold() == wanted.name.casefold():
+        return True
+    return path.stem.casefold() == wanted.stem.casefold() and path.suffix.lower() in VIDEO_EXTS
+
+
+def locate_video(folder: Path, filename: str, *, selected_only: bool = False) -> Path | None:
+    if not filename:
+        return None
+    root, selected, _ = resolve_cam_session(folder)
+    bases: list[Path] = []
+    for base in ((selected,) if selected_only else (selected, root, originals_root(root))):
+        if base not in bases:
+            bases.append(base)
+    fuzzy: Path | None = None
+    for base in bases:
+        if not base.is_dir():
+            continue
+        direct = base / filename
+        if direct.is_file() and not _skipped_video(direct, base):
+            return direct
+        for path in base.rglob("*"):
+            if not path.is_file() or path.name.startswith(".") or _skipped_video(path, base):
+                continue
+            if path.name.casefold() == Path(filename).name.casefold():
+                return path
+            if fuzzy is None and _same_video(path, filename):
+                fuzzy = path
+    return fuzzy
 
 
 def resolve_video(folder: Path, filename: str) -> Path:
     if not filename:
         raise RuntimeError("文件名为空")
-    root, cam_dir, _ = resolve_cam_session(folder)
-    src_root = originals_root(root)
-    # 先在所选机位里找，再兜底到其它机位/作废（只读，不改对照表）
-    candidates = [cam_dir / filename]
-    for cam in CAMS:
-        candidates.append(src_root / cam / filename)
-        candidates.append(root / cam / filename)
-    candidates.append(src_root / "作废" / filename)
-    candidates.append(root / "作废" / filename)
-    seen = set()
-    for path in candidates:
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        if path.is_file():
-            return path
-    raise RuntimeError(f"找不到视频：{filename}")
+    found = locate_video(folder, filename)
+    if found is None:
+        raise RuntimeError(f"找不到视频：{filename}")
+    return found
 
 
 def progress_path(output: Path) -> Path:
@@ -415,21 +546,29 @@ def export_take(
     label_rows = []
     missing = []
 
-    review = (cam or "").strip().lower()
+    review = (cam or take_info.get("review_cam") or "").strip().lower()
     if sync:
         targets = [name for name in CAMS if take_info["files"].get(name)]
         if not targets:
             raise RuntimeError("没有可切的视频")
     else:
         if review not in CAMS:
-            raise RuntimeError("还没确定要切的机位")
+            raise RuntimeError("这条在对照表里没有机位")
         if not take_info["files"].get(review):
             raise RuntimeError(f"{review} 没有这条视频")
         targets = [review]
 
+    cut_cams = []
     for review_cam in targets:
         filename = take_info["files"].get(review_cam)
-        src = resolve_video(folder, filename)
+        try:
+            src = resolve_video(folder, filename)
+        except RuntimeError:
+            if sync:
+                missing.append(review_cam)
+                continue
+            raise
+        cut_cams.append(review_cam)
         for idx, seg in enumerate(segs):
             r_no = r0 + idx
             out_name = f"{action}_{user_id}_r{r_no:03d}_{review_cam}.mp4"
@@ -460,7 +599,7 @@ def export_take(
     upsert_label_rows(output, label_rows)
     progress = read_progress(output)
     done = {str(item) for item in progress.get("done", [])}
-    for name in targets:
+    for name in cut_cams:
         done.add(progress_key(take_info["take"], name))
     progress["done"] = sorted(done, key=lambda item: (int(str(item).split(":", 1)[0] or 0), str(item)))
     progress.setdefault("marks", {})

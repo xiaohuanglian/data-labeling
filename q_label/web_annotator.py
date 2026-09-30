@@ -1606,10 +1606,13 @@ def _offline_takes_payload() -> list[dict]:
     cam = offline_cfg.get("cam") or ""
     payload = []
     for item in takes:
+        mark_cam = cam or item.get("review_cam") or ""
+        if not item.get("present"):
+            continue
         row = dict(item)
-        row["done"] = offline_cut.is_take_done(done, item["take"], cam)
-        row["marks"] = offline_cut.marks_for(marks, item["take"], cam, bool(offline_cfg.get("sync")))
-        row["review_cam"] = cam or item.get("review_cam") or "c90"
+        row["done"] = offline_cut.is_take_done(done, item["take"], mark_cam)
+        row["marks"] = offline_cut.marks_for(marks, item["take"], mark_cam, bool(offline_cfg.get("sync")))
+        row["review_cam"] = mark_cam
         payload.append(row)
     return payload
 
@@ -1620,6 +1623,7 @@ def _set_offline_cam_folder(raw: str) -> dict:
     offline_cfg["output"] = str(root)
     offline_cfg["root"] = str(root)
     offline_cfg["cam"] = cam
+    lookup = offline_cut.find_lookup(cam_dir)
     csv_path = offline_cut.ensure_labels_csv(root)
     return {
         "root": str(root),
@@ -1627,7 +1631,7 @@ def _set_offline_cam_folder(raw: str) -> dict:
         "output": str(root),
         "cam": cam,
         "csv_path": str(csv_path),
-        "lookup": str(root / "对照表.csv"),
+        "lookup": str(lookup or (root / "对照表.csv")),
     }
 
 
@@ -1660,6 +1664,16 @@ def offline_set_config():
         takes = _offline_takes_payload()
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
+    if data.get("folder") and not takes:
+        raw_count = len(offline_cut.load_takes(Path(offline_cfg["folder"])))
+        if raw_count:
+            return jsonify({
+                "error": (
+                    f"对照表里有 {raw_count} 条，但在所选文件夹里找不到这些视频。"
+                    "视频和对照表放在一起即可，放在子文件夹里也可以。"
+                ),
+            }), 400
+        return jsonify({"error": "对照表里没有可以标注的条目"}), 400
     return jsonify({
         "folder": offline_cfg["folder"],
         "output": offline_cfg["output"],
@@ -1674,19 +1688,25 @@ def offline_set_config():
 @app.post("/api/offline/browse/folder")
 def offline_browse_folder():
     try:
-        path = pick_folder("选择机位文件夹，例如 S004/现场原视频/c90")
+        path = pick_folder("选择放有视频和对照表的文件夹")
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
     try:
         info = _set_offline_cam_folder(path)
-        n = len([t for t in offline_cut.load_takes(Path(info["folder"])) if t["keep"]])
+        takes = offline_cut.load_takes(Path(info["folder"]))
+        present = [item for item in takes if item.get("present") and item.get("keep")]
+        if not present:
+            if takes:
+                raise RuntimeError(
+                    f"对照表里有 {len(takes)} 条，但在所选文件夹里找不到这些视频。"
+                    "视频和对照表放在一起即可，放在子文件夹里也可以。"
+                )
+            raise RuntimeError("对照表里没有可以标注的条目")
+        n = len(present)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
-    hint = (
-        f"预览机位 {info['cam']}（只切这一条视频，其他机位要各自再标）；"
-        f"只读对照表 {info['lookup']}；"
-        f"新建标注表 {info['csv_path']}；有效 {n} 条"
-    )
+    place = f"机位 {info['cam']}" if info.get("cam") else "这个文件夹"
+    hint = f"已读取对照表，{place}里有 {n} 条可标注。视频不用按机位拆开，剪切结果写在对照表旁边的「处理后视频」。"
     return jsonify({
         "path": info["folder"],
         "output": info["output"],
@@ -1769,7 +1789,7 @@ def offline_export():
     folder = Path(offline_cfg["folder"])
     output = Path(offline_cfg["output"])
     if not folder.is_dir():
-        return jsonify({"error": "还没选机位文件夹，例如 S004/现场原视频/c90"}), 400
+        return jsonify({"error": "还没选择放有视频和对照表的文件夹"}), 400
     if not offline_cfg["output"]:
         return jsonify({"error": "还没选机位文件夹"}), 400
     try:
@@ -1789,7 +1809,7 @@ def offline_export():
         return jsonify({"error": str(exc)}), 400
 
     take_no = int(data["take"])
-    cam = (offline_cfg.get("cam") or data.get("cam") or "").strip().lower()
+    cam = (offline_cfg.get("cam") or data.get("cam") or info.get("review_cam") or "").strip().lower()
     with offline_job_lock:
         busy = [
             job for job in offline_jobs.values()

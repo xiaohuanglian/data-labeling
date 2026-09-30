@@ -18,7 +18,7 @@
     </div>
     <div class="topbar-actions">
       <a class="btn ghost" href="/">← 返回首页</a>
-      <div class="progress-chip" id="progressChip">等待选择机位文件夹</div>
+      <div class="progress-chip" id="progressChip">等待选择文件夹</div>
     </div>
   </header>
 
@@ -28,7 +28,7 @@
         <div>
           <p class="eyebrow">Offline Cut + Label</p>
           <h2>按 checklist 切分，并自动带上做法和支撑侧</h2>
-          <p class="hero-copy">选一个机位文件夹来看。剪切方式可选：不同步时只切当前这一条；同步时用同一组起止时间切对照表里有的各机位。每一段自己标起始和结束，没标的空白和不要的 rep 不会剪进去。对照表.csv 只读；短片在 <strong>处理后视频/</strong>。</p>
+          <p class="hero-copy">选择放着视频和对照表的文件夹即可，放在哪一层、要不要按机位拆开都可以。不同步时只切当前看到的这一条；同步时用同一组起止时间切对照表里找得到的各机位。每一段自己标起始和结束。对照表只读；短片写在对照表旁边的 <strong>处理后视频/</strong>。</p>
         </div>
         <button class="btn primary xl" id="btnStart">开始处理</button>
       </div>
@@ -36,10 +36,10 @@
       <div class="setup-grid">
         <article class="card step-card">
           <div class="step-number">1</div>
-          <h3>选择机位文件夹</h3>
-          <p class="hint">选你要看的那一机，例如 D:\采集\S004\现场原视频\c90。也可以直接粘贴路径。</p>
+          <h3>选择视频文件夹</h3>
+          <p class="hint">选中视频和对照表所在的文件夹。对照表在上一级也可以。不需要拆成 c0、c270。</p>
           <div class="picker-row">
-            <input id="folderPath" type="text" placeholder="粘贴路径，例如 D:\采集\S004\现场原视频\c90" />
+            <input id="folderPath" type="text" placeholder="粘贴路径，例如 D:\采集\S007" />
             <button class="btn secondary" id="btnBrowseFolder">浏览</button>
           </div>
           <label class="hint">剪切方式
@@ -76,7 +76,7 @@
           </div>
         </article>
       </div>
-      <div class="setup-status" id="setupHint">请选择预览机位。标注表会新建在上一级（S004/labels.csv），不会写入对照表。</div>
+      <div class="setup-status" id="setupHint">选择文件夹后点「开始处理」。视频和对照表放在一起即可。</div>
     </section>
 
     <section class="workspace" id="workspace" hidden>
@@ -162,6 +162,6 @@
       </aside>
     </section>
   </main>
-  <script src="static/offline.js?v=9"></script>
+  <script src="static/offline.js?v=10"></script>
 </body>
 </html>

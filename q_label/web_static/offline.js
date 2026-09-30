@@ -228,11 +228,11 @@ async function loadTake(index) {
   state.index = index;
   const take = currentTake();
   $("takePicker").value = String(index);
-  state.cam = state.cam || take.review_cam;
+  state.previewCam = camFor(take);
   if ($("lblCam")) {
     $("lblCam").textContent = state.sync
-      ? `预览 ${state.cam} · 同步切各机位`
-      : `预览 ${state.cam} · 只切这一条`;
+      ? `预览 ${state.previewCam} · 同步切各机位`
+      : `预览 ${state.previewCam} · 只切这一条`;
   }
   const draft = take.marks || {};
   state.starts = Array.isArray(draft.starts) ? draft.starts.map(Number) : [];
@@ -247,13 +247,13 @@ async function loadTake(index) {
 async function loadVideo() {
   const take = currentTake();
   if (!take) return;
-  const filename = take.files[state.cam];
+  const filename = take.files[state.previewCam || camFor(take)];
   if (!filename) {
-    setStatus(`${state.cam} 没有文件`, false);
+    setStatus(`${state.previewCam || "这条"} 没有文件`, false);
     return;
   }
   const video = $("video");
-  video.src = `${API}/video/${take.take}/${state.cam}?t=${Date.now()}`;
+  video.src = `${API}/video/${take.take}/${state.previewCam || camFor(take)}?t=${Date.now()}`;
   $("videoPlaceholder").hidden = true;
   $("lblFilename").textContent = filename;
   try {
@@ -274,20 +274,26 @@ function tick() {
   }
 }
 
+function camFor(take) {
+  if (!take) return state.cam || "";
+  if (state.cam && take.files && take.files[state.cam]) return state.cam;
+  return take.review_cam || state.cam || "";
+}
+
 function jobOf(takeNo) {
-  const cam = state.cam || "";
+  const take = state.takes.find((item) => item.take === takeNo);
+  const cam = camFor(take);
   return state.jobs[`${cam}:${takeNo}`] || null;
 }
 
 function applyJobs(jobs) {
   const map = {};
-  const cam = state.cam || "";
   (jobs || []).forEach((job) => {
-    if ((job.cam || "") !== cam) return;
-    map[`${cam}:${job.take}`] = job;
+    map[`${job.cam || ""}:${job.take}`] = job;
   });
   state.jobs = map;
   state.takes.forEach((take) => {
+    const cam = camFor(take);
     const job = map[`${cam}:${take.take}`];
     if (!job) return;
     if (job.status === "done") {
@@ -301,7 +307,7 @@ function applyJobs(jobs) {
     }
   });
   refreshTakePicker();
-  const mine = (jobs || []).filter((j) => (j.cam || "") === cam);
+  const mine = (jobs || []).filter((job) => state.takes.some((take) => take.take === job.take && camFor(take) === (job.cam || "")));
   const failed = mine.filter((j) => j.status === "error");
   const running = mine.filter((j) => j.status === "queued" || j.status === "running");
   if (failed.length) {
@@ -354,6 +360,7 @@ async function exportTake() {
       peaks: state.peaks,
       duration: state.duration,
       sync: state.sync,
+      cam: state.previewCam || camFor(take),
       user: userPayload(),
     });
     take.queued = true;
@@ -400,7 +407,7 @@ async function startWorkspace() {
   state.sync = Boolean(cfg.sync);
   state.takes = cfg.takes || [];
   state.cam = cfg.cam || state.cam;
-  if (!state.takes.length) throw new Error("对照表里没有条目");
+  if (!state.takes.length) throw new Error("这个文件夹里没有可标注的视频");
   const first = state.takes.findIndex((t) => t.keep && !t.done);
   $("setupCard").hidden = true;
   $("workspace").hidden = false;
@@ -421,7 +428,7 @@ function bind() {
   $("btnBrowseFolder").onclick = async () => {
     const btn = $("btnBrowseFolder");
     btn.disabled = true;
-    $("setupHint").textContent = "请在弹出的窗口里选择机位文件夹。";
+    $("setupHint").textContent = "请在弹出的窗口里选择文件夹。";
     try {
       const data = await post("/browse/folder");
       $("folderPath").value = data.path;
@@ -429,7 +436,7 @@ function bind() {
       $("setupHint").textContent = data.hint || "已选择这一机。只切当前视频，其他机位要各自再标。";
     } catch (err) {
       const msg = err.message || "";
-      $("setupHint").textContent = msg.includes("没有选择") ? "请选择机位文件夹。" : msg;
+      $("setupHint").textContent = msg.includes("没有选择") ? "请选择文件夹。" : msg;
     } finally {
       btn.disabled = false;
     }
